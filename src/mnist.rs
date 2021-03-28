@@ -4,6 +4,7 @@ use byteorder::{
     ReadBytesExt,
 };
 use flate2::read::GzDecoder;
+use crate::types as t;
 
 #[derive(Debug)]
 pub enum Error {
@@ -21,7 +22,7 @@ impl From<io::Error> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Image {
-    pixels: Vec<u8>,
+    pixels: Vec<f32>,
     width: usize,
     height: usize,
 }
@@ -35,17 +36,19 @@ impl Image {
         let npixels: usize = width * height;
         let mut pixels: Vec<u8> = vec![0u8; npixels];
         rdr.read(&mut pixels)?;
+        let pixels: Vec<f32> = pixels.into_iter().map(|u| (u as f32) / 255.0).collect();
         Ok(Image {
             pixels, width, height,
         })
     }
 }
 
-impl Into<Vec<f32>> for &Image {
-    fn into(self) -> Vec<f32> {
-        self.pixels.iter().map(|px| {
-            (*px as f32) / 255.0
-        }).collect()
+impl t::Input for Image {
+    fn size(&self) -> usize {
+        self.width * self.height
+    }
+    fn data(&self) -> &Vec<f32> {
+        &self.pixels
     }
 }
 
@@ -74,10 +77,34 @@ impl ImageFile {
     }
 }
 
+#[derive(Debug)]
+pub struct RecognizedDigit(Vec<f32>);
+
+impl RecognizedDigit {
+    pub fn parse(label: usize, max: usize) -> Self {
+        let mut data: Vec<f32> = vec![0f32; max];
+        data[label] = 1.0f32;
+        Self(data)
+    }
+}
+
+impl t::Output for RecognizedDigit {
+    fn size(&self) -> usize {
+        self.0.len()
+    }
+    fn data(&self) -> &Vec<f32> {
+        &self.0
+    }
+    fn from_nn_output(data: Vec<f32>) -> Self {
+        if data.len() != 10 {
+            panic!("invalid nn output size (got {}, wanted {})", data.len(), 10)
+        }
+        Self(data)
+    }
+}
+
 pub struct LabelFile {
-    magic: u32,
-    num_labels: u32,
-    labels: Vec<u8>,
+    labels: Vec<RecognizedDigit>,
 }
 
 impl LabelFile {
@@ -90,24 +117,20 @@ impl LabelFile {
         let mut labels: Vec<u8> = vec![0u8; num_labels as usize];
         rdr.read(&mut labels)?;
         Ok(LabelFile {
-            magic, num_labels, labels,
+            labels: labels.into_iter().map(|l| RecognizedDigit::parse(l as usize, 10usize)).collect()
         })
     }
 }
 
-pub struct Set {
-    pub images: ImageFile,
-    labels: LabelFile,
+pub type Data = t::InMemoryData<Image, RecognizedDigit>;
+
+pub fn load(name: &str) -> Result<Data> {
+    let labels_gz = fs::File::open(format!("{}-labels-idx1-ubyte.gz", name))?;
+    let labels = LabelFile::parse(GzDecoder::new(labels_gz))?;
+    let images_gz = fs::File::open(format!("{}-images-idx3-ubyte.gz", name))?;
+    let images = ImageFile::parse(GzDecoder::new(images_gz))?;
+    
+    let zipped: Vec<(Image, RecognizedDigit)> = images.images.into_iter().zip(labels.labels.into_iter()).collect();
+    Ok(t::InMemoryData::new(zipped))
 }
 
-impl Set {
-    pub fn load(name: &str) -> Result<Self> {
-        let labels_gz = fs::File::open(format!("{}-labels-idx1-ubyte.gz", name))?;
-        let labels = LabelFile::parse(GzDecoder::new(labels_gz))?;
-        let images_gz = fs::File::open(format!("{}-images-idx3-ubyte.gz", name))?;
-        let images = ImageFile::parse(GzDecoder::new(images_gz))?;
-        Ok(Set {
-            images, labels,
-        })
-    }
-}

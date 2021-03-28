@@ -1,7 +1,10 @@
 use std::time;
 use rand::Rng;
 use rayon::prelude::*;
+use crate::types as t;
+use crate::types::{Data, Input, Output};
 
+pub mod types;
 mod mnist;
 
 struct Network {
@@ -30,9 +33,9 @@ impl Network {
         }
     }
 
-    fn feedforward(&self, a: &Vec<f32>) -> Vec<f32> {
-        let res: Option<Vec<f32>> = None;
-        self.biases.iter()
+    fn feedforward<D: t::Data>(&self, i: &D::Input) -> D::Output {
+        let a = i.data();
+        let o = self.biases.iter()
             .zip(self.weights.iter())
             .fold(a.clone(), |a, (biases, weights)| {
                 mat_vec_mult(weights, &a).iter()
@@ -40,7 +43,8 @@ impl Network {
                     .map(|(aa, b)| {
                         sigmoid(aa+b)
                     }).collect()
-            })
+            });
+        D::Output::from_nn_output(o)
     }
 }
 
@@ -61,9 +65,14 @@ fn main() {
     env_logger::init();
 
     let now = time::Instant::now();
-    let set = mnist::Set::load("train").unwrap();
+    let train = mnist::load("train").unwrap();
     let elapsed = now.elapsed();
-    log::info!("Loaded {} images in {:?}.", set.images.images.len(), elapsed);
+    log::info!("Loaded {} images in {:?}.", train.len(), elapsed);
+
+    let num_train = (train.len() as f64 * 5.0/6.0) as usize;
+    let num_validation = train.len() - num_train;
+    log::info!("Split into {} training and {} validation", num_train, num_validation);
+    let (train, validation) = train.split(num_train);
 
     let now = time::Instant::now();
     let size = vec![
@@ -76,8 +85,8 @@ fn main() {
     log::info!("Created random network {:?} in {:?}.", size, elapsed);
 
     let now = time::Instant::now();
-    let image: Vec<f32> = (&set.images.images[0]).into();
-    let res = network.feedforward(&image);
+    let data = train.iter().next().unwrap();
+    let res = network.feedforward::<mnist::Data>(&data.0);
     let elapsed = now.elapsed();
     log::info!("feedforward: {:?} in {:?}", res, elapsed);
 }
