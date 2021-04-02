@@ -7,9 +7,12 @@ use serde::{Serialize, Deserialize};
 
 pub mod types;
 pub mod maths;
+pub mod proto;
 mod mnist;
 
+use proto::network as npb;
 use maths::{Vector, Matrix, Shape};
+use protobuf::Message;
 
 #[derive(Serialize,Deserialize)]
 struct JSONBiases(Vec<Vec<Vec<f32>>>);
@@ -36,6 +39,33 @@ impl Network {
             sizes: sizes.clone(),
             biases, weights,
         }
+    }
+
+    fn proto(&self) -> npb::Network {
+        let mut res = npb::Network::new();
+
+        let mut input = npb::InputLayer::new();
+        input.set_size(self.weights[0].shape().columns() as u32);
+        res.set_input(input);
+
+        for (b, w) in self.biases.iter().zip(self.weights.iter()) {
+            let mut inner = npb::InnerLayer::new();
+            inner.set_size(b.len() as u32);
+            inner.set_biases(b.iter().cloned().collect());
+            
+            let rows = w.shape().rows();
+            let columns = w.shape().columns();
+            let mut weights: Vec<f32> = Vec::with_capacity(rows * columns);
+            for row in &w.rows {
+                for el in row.iter() {
+                    weights.push(*el);
+                }
+            }
+            inner.set_weights(weights);
+            res.mut_inner().push(inner);
+        }
+
+        res
     }
 
     fn dump(&self) {
@@ -241,5 +271,8 @@ fn main() {
     let elapsed = now.elapsed();
     log::info!("Created random network {:?} in {:?}.", size, elapsed);
     
-    net.sgd(&train, 90, 10, 1.0, Some(&test));
+    net.sgd(&train, 30, 32, 3.0, Some(&test));
+    let proto = net.proto();
+    let mut f = std::fs::File::create("net.pb").unwrap();
+    proto.write_to_writer(&mut f).unwrap();
 }

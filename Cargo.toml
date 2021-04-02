@@ -18,3 +18,4 @@ itertools = "0.10.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = "0.23"
+protobuf = "2"

@@ -1,0 +1,17 @@
+syntax = "proto3";
+package neural.network;
+
+message InputLayer {
+    uint32 size = 1;
+}
+
+message InnerLayer {
+    uint32 size = 1;
+    repeated float weights = 2;
+    repeated float biases = 3;;
+}
+
+message Network {
+    InputLayer input = 1;
+    repeated InnerLayer inner = 2;
+}
