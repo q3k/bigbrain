@@ -5,12 +5,14 @@ use byteorder::{
 };
 use flate2::read::GzDecoder;
 use crate::types as t;
+use crate::maths::Vector;
+
+use image::{RgbImage, Rgb};
 
 #[derive(Debug)]
 pub enum Error {
     IO(io::Error),
     InvalidMagic,
-    Parse(String),
 }
 
 impl From<io::Error> for Error {
@@ -21,8 +23,9 @@ impl From<io::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Debug, Clone)]
 pub struct Image {
-    pixels: Vec<f32>,
+    pixels: Vector,
     width: usize,
     height: usize,
 }
@@ -35,11 +38,24 @@ impl Image {
     ) -> Result<Self> {
         let npixels: usize = width * height;
         let mut pixels: Vec<u8> = vec![0u8; npixels];
-        rdr.read(&mut pixels)?;
-        let pixels: Vec<f32> = pixels.into_iter().map(|u| (u as f32) / 255.0).collect();
+        rdr.read_exact(&mut pixels)?;
+        let pixels: Vector = pixels.into_iter().map(|u| (u as f32) / 255.0).collect();
         Ok(Image {
             pixels, width, height,
         })
+    }
+
+    pub fn to_rgb(
+        &self,
+    ) -> RgbImage {
+        let mut image = RgbImage::new(self.width as u32, self.height as u32);
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let val = (self.pixels[y*self.height+x] * 255.0) as u8;
+                image.put_pixel(x as u32, y as u32, Rgb([val; 3]));
+            }
+        }
+        image
     }
 }
 
@@ -47,7 +63,7 @@ impl t::Input for Image {
     fn size(&self) -> usize {
         self.width * self.height
     }
-    fn data(&self) -> &Vec<f32> {
+    fn data(&self) -> &Vector {
         &self.pixels
     }
 }
@@ -77,12 +93,12 @@ impl ImageFile {
     }
 }
 
-#[derive(Debug)]
-pub struct RecognizedDigit(Vec<f32>);
+#[derive(Debug, Clone)]
+pub struct RecognizedDigit(Vector);
 
 impl RecognizedDigit {
     pub fn parse(label: usize, max: usize) -> Self {
-        let mut data: Vec<f32> = vec![0f32; max];
+        let mut data = Vector::zeroes(max);
         data[label] = 1.0f32;
         Self(data)
     }
@@ -92,10 +108,10 @@ impl t::Output for RecognizedDigit {
     fn size(&self) -> usize {
         self.0.len()
     }
-    fn data(&self) -> &Vec<f32> {
+    fn data(&self) -> &Vector {
         &self.0
     }
-    fn from_nn_output(data: Vec<f32>) -> Self {
+    fn from_nn_output(data: Vector) -> Self {
         if data.len() != 10 {
             panic!("invalid nn output size (got {}, wanted {})", data.len(), 10)
         }
@@ -115,7 +131,7 @@ impl LabelFile {
         }
         let num_labels = rdr.read_u32::<BigEndian>()?;
         let mut labels: Vec<u8> = vec![0u8; num_labels as usize];
-        rdr.read(&mut labels)?;
+        rdr.read_exact(&mut labels)?;
         Ok(LabelFile {
             labels: labels.into_iter().map(|l| RecognizedDigit::parse(l as usize, 10usize)).collect()
         })
