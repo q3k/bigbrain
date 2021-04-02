@@ -2,17 +2,18 @@ use itertools::Itertools;
 use rayon::prelude::*;
 
 use crate::types as t;
-use crate::types::{Input, Output};
+use crate::types::{Data, Input, Output};
 use crate::proto::network as npb;
 use crate::maths::{Vector, Matrix, Shape};
 
-pub struct Network {
+pub struct Network<D: Data> {
     sizes: Vec<usize>,
     biases: Vec<Vector>,
     weights: Vec<Matrix>,
+    phantom: std::marker::PhantomData<D>,
 }
 
-impl Network {
+impl<D: Data> Network<D> {
     pub fn new(sizes: &Vec<usize>) -> Self {
         let mut rng = rand::thread_rng();
 
@@ -24,6 +25,7 @@ impl Network {
         Self {
             sizes: sizes.clone(),
             biases, weights,
+            phantom: std::marker::PhantomData,
         }
     }
 
@@ -64,7 +66,7 @@ impl Network {
         }
     }
 
-    fn feedforward<D: t::Data>(&self, i: &D::Input) -> D::Output {
+    fn feedforward(&self, i: &D::Input) -> D::Output {
         let mut a = i.data().clone();
         for (b, w) in self.biases.iter().zip(self.weights.iter()) {
             let mut z = w.mult_vec(&a);
@@ -77,7 +79,7 @@ impl Network {
         D::Output::from_nn_output(a)
     }
 
-    pub fn sgd<D: t::Data>(
+    pub fn sgd(
         &mut self,
         data: &D,
         epochs: usize,
@@ -89,7 +91,7 @@ impl Network {
             let shuffled = data.shuffle();
             let batches = shuffled.iter().chunks(mini_batch_size);
             for batch in &batches {
-                self.update_batch::<D, _>(batch, eta);
+                self.update_batch(batch, eta);
             }
             if let Some(td) = test_data {
                 let n_test = td.size();
@@ -100,14 +102,13 @@ impl Network {
         }
     }
 
-    fn update_batch<'a, D, B>(
+    fn update_batch<'a, B>(
         &mut self,
         batch: B,
         eta: f32,
     ) where 
-        D: t::Data,
-        D::Input: 'a + Sync,
-        D::Output: 'a + Sync,
+        D::Input: 'a,
+        D::Output: 'a,
         B: std::iter::Iterator<Item = &'a (D::Input, D::Output)>,
     {
         let mut nabla_b: Vec<Vector> = self.biases.iter().map(|el| {
@@ -119,7 +120,7 @@ impl Network {
 
         let batch: Vec<(D::Input, D::Output)> = batch.cloned().collect();
         let par = batch.par_iter().map(|(input, output)| {
-            self.backprop::<D>(input, output)
+            self.backprop(input, output)
         });
 
         let mut batch_size = 0usize;
@@ -144,13 +145,13 @@ impl Network {
         }
     }
 
-    fn evaluate<D: t::Data>(
+    fn evaluate(
         &self,
         test_data: &D,
     ) -> usize {
         let mut count: usize = 0;
         for (input, expected) in test_data.iter() {
-            let got = self.feedforward::<D>(input);
+            let got = self.feedforward(input);
             if got.onehot_decode() == expected.onehot_decode() {
                 count += 1;
             }
@@ -158,7 +159,7 @@ impl Network {
         count
     }
 
-    fn backprop<D: t::Data>(
+    fn backprop(
         &self,
         x: &D::Input,
         y: &D::Output,
@@ -187,7 +188,7 @@ impl Network {
         zs.reverse();
 
         let sp: Vector = zs[0].iter().map(|el| sigmoid_prime(*el)).collect();
-        let mut delta: Vector = self.cost_derivative::<D>(&activations[0], y);
+        let mut delta: Vector = self.cost_derivative(&activations[0], y);
         delta.mult_mut(&sp);
 
         nabla_b.push(delta.clone());
@@ -213,7 +214,7 @@ impl Network {
         (nabla_b, nabla_w)
     }
 
-    fn cost_derivative<D: t::Data>(
+    fn cost_derivative(
         &self,
         output_activations: &Vector,
         y: &D::Output,

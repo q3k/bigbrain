@@ -30,7 +30,7 @@ pub trait Output: std::fmt::Debug + Clone + Sync {
     }
 }
 
-pub trait Data {
+pub trait Data: Sync {
     type Input: Input;
     type Output: Output;
 
