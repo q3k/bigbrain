@@ -6,6 +6,13 @@ use crate::types::{Data, Input, Output};
 use crate::proto::network as npb;
 use crate::maths::{Vector, Matrix, Shape};
 
+#[derive(Debug)]
+pub enum Error {
+    WrongProto(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
 pub struct Network<D: Data> {
     sizes: Vec<usize>,
     biases: Vec<Vector>,
@@ -27,6 +34,39 @@ impl<D: Data> Network<D> {
             biases, weights,
             phantom: std::marker::PhantomData,
         }
+    }
+
+    pub fn from_proto(n: &npb::Network) -> Result<Self> {
+        let mut biases: Vec<Vector> = vec![];
+        let mut weights: Vec<Matrix> = vec![];
+        let mut sizes: Vec<usize> = vec![];
+        if n.get_input().size <= 0 {
+            return Err(Error::WrongProto("input layer must have size".into()));
+        }
+
+        let mut prev_size = n.get_input().size as usize;
+        sizes.push(prev_size);
+        for layer in &n.inner {
+            let rows = layer.biases.len();
+            let columns = layer.weights.len() / rows;
+            if columns != prev_size {
+                return Err(Error::WrongProto(format!("size mismatch, {} columns, {} prev", columns, prev_size)));
+            }
+            biases.push(Vector(layer.biases.clone()));
+
+            let mut rowvec: Vec<Vector> = Vec::with_capacity(rows);
+            for nr in 0..rows {
+                rowvec.push(layer.weights[nr*columns..(nr+1)*columns].iter().cloned().collect());
+            }
+            weights.push(Matrix::new(rowvec));
+            prev_size = rows;
+            sizes.push(prev_size);
+        }
+
+        Ok(Self {
+            sizes, weights, biases,
+            phantom: std::marker::PhantomData,
+        })
     }
 
     pub fn proto(&self) -> npb::Network {
@@ -66,7 +106,7 @@ impl<D: Data> Network<D> {
         }
     }
 
-    fn feedforward(&self, i: &D::Input) -> D::Output {
+    pub fn feedforward(&self, i: &D::Input) -> D::Output {
         let mut a = i.data().clone();
         for (b, w) in self.biases.iter().zip(self.weights.iter()) {
             let mut z = w.mult_vec(&a);
@@ -145,7 +185,7 @@ impl<D: Data> Network<D> {
         }
     }
 
-    fn evaluate(
+    pub fn evaluate(
         &self,
         test_data: &D,
     ) -> usize {

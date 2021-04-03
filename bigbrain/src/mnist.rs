@@ -45,6 +45,17 @@ impl Image {
         })
     }
 
+    pub fn from_vec(data: &Vec<f32>) -> Self {
+        if data.len() != 28*28 {
+            panic!("invalid data len");
+        }
+        Self {
+            pixels: data.iter().cloned().collect(),
+            width: 28,
+            height: 28,
+        }
+    }
+
     pub fn to_rgb(
         &self,
     ) -> RgbImage {
